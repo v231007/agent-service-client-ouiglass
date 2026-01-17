@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OuiGlass Suisse - Exemple Chatbot</title>
+
+  <!-- Styles du site (exemple) -->
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      color: #333;
+    }
+
+    header {
+      background: linear-gradient(135deg, #0066CC 0%, #0052A3 100%);
+      color: white;
+      padding: 60px 20px;
+      text-align: center;
+    }
+
+    header h1 {
+      font-size: 2.5em;
+      margin-bottom: 10px;
+    }
+
+    header p {
+      font-size: 1.2em;
+      opacity: 0.9;
+    }
+
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 60px 20px;
+    }
+
+    .hero {
+      text-align: center;
+      margin-bottom: 60px;
+    }
+
+    .hero h2 {
+      font-size: 2em;
+      margin-bottom: 20px;
+      color: #0066CC;
+    }
+
+    .hero p {
+      font-size: 1.1em;
+      color: #666;
+      max-width: 600px;
+      margin: 0 auto 30px;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 30px;
+      margin-bottom: 60px;
+    }
+
+    .feature {
+      background: #F5F5F5;
+      padding: 30px;
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .feature-icon {
+      font-size: 3em;
+      margin-bottom: 15px;
+    }
+
+    .feature h3 {
+      font-size: 1.3em;
+      margin-bottom: 10px;
+      color: #0066CC;
+    }
+
+    .feature p {
+      color: #666;
+    }
+
+    .cta {
+      background: #0066CC;
+      color: white;
+      padding: 40px;
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .cta h2 {
+      font-size: 2em;
+      margin-bottom: 15px;
+    }
+
+    .cta p {
+      font-size: 1.2em;
+      margin-bottom: 20px;
+      opacity: 0.9;
+    }
+
+    .cta-button {
+      background: white;
+      color: #0066CC;
+      padding: 15px 40px;
+      border: none;
+      border-radius: 30px;
+      font-size: 1.1em;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .cta-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    footer {
+      background: #333;
+      color: white;
+      text-align: center;
+      padding: 30px 20px;
+      margin-top: 60px;
+    }
+
+    @media (max-width: 768px) {
+      header h1 {
+        font-size: 2em;
+      }
+
+      .hero h2 {
+        font-size: 1.5em;
+      }
+    }
+  </style>
+
+  <!-- CSS du chatbot OuiGlass -->
+  <link rel="stylesheet" href="ouiglass-chat-widget.css">
+</head>
+<body>
+
+  <header>
+    <h1>🚗 OuiGlass Suisse</h1>
+    <p>Votre spécialiste du remplacement de vitrage automobile en Suisse romande</p>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h2>Pare-brise fissuré ? On s'occupe de tout !</h2>
+      <p>
+        Intervention rapide à domicile ou au travail. Zéro avance de frais, on gère tout avec votre assurance.
+      </p>
+    </section>
+
+    <section class="features">
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <h3>Intervention rapide</h3>
+        <p>Rendez-vous sous 24-48h partout en Suisse romande</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">🏠</div>
+        <h3>À domicile ou au travail</h3>
+        <p>On vient chez vous, vous n'avez rien à faire</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">💰</div>
+        <h3>Zéro avance de frais</h3>
+        <p>On gère tout avec votre assurance, aucun paiement de votre part</p>
+      </div>
+
+      <div class="feature">
+        <div class="feature-icon">✅</div>
+        <h3>Garantie qualité</h3>
+        <p>Pièces d'origine, techniciens certifiés, calibration ADAS incluse</p>
+      </div>
+    </section>
+
+    <section class="cta">
+      <h2>Besoin d'un rendez-vous ?</h2>
+      <p>Utilisez notre chatbot pour fixer un RDV en 2 minutes !</p>
+      <button class="cta-button" onclick="openChat()">
+        💬 Prendre RDV maintenant
+      </button>
+    </section>
+  </main>
+
+  <footer>
+    <p>&copy; 2025 OuiGlass Suisse - Tous droits réservés</p>
+    <p>Genève | Lausanne | Montreux | Fribourg | Neuchâtel | Valais | Jura</p>
+  </footer>
+
+  <!-- JavaScript du chatbot OuiGlass -->
+  <script src="ouiglass-chat-widget.js"></script>
+
+  <script>
+    /**
+     * Configuration du chatbot OuiGlass
+     * IMPORTANT : Remplacer l'URL du webhook par votre URL N8N
+     */
+    const chat = new OuiGlassChat({
+      // URL du webhook N8N (OBLIGATOIRE)
+      webhookUrl: 'https://votre-instance.app.n8n.cloud/webhook/chat',
+
+      // Couleur principale (optionnel - utilise le bleu OuiGlass par défaut)
+      primaryColor: '#0066CC',
+
+      // Position du widget (optionnel)
+      position: 'bottom-right', // ou 'bottom-left'
+
+      // Afficher le widget après X secondes (optionnel)
+      showAfterSeconds: 5,
+
+      // Message d'accueil (optionnel)
+      greetingMessage: '👋 Besoin d\'un remplacement de pare-brise ? Je peux vous donner un RDV en 2 minutes !',
+
+      // Texte du placeholder (optionnel)
+      placeholderText: 'Tapez votre message...',
+
+      // Ouvrir automatiquement au chargement (optionnel)
+      autoOpen: false,
+
+      // Activer upload de photos (optionnel)
+      enableFileUpload: true,
+
+      // Taille max fichiers en bytes (optionnel - 5 MB par défaut)
+      maxFileSize: 5 * 1024 * 1024,
+
+      // Types de fichiers autorisés (optionnel)
+      allowedFileTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+    });
+
+    /**
+     * Fonction pour ouvrir le chat (appelée par le bouton CTA)
+     */
+    function openChat() {
+      // Accéder aux méthodes publiques du chat
+      if (window.OuiGlassChat && chat) {
+        chat.openChat();
+      }
+    }
+
+    /**
+     * EXEMPLE : Pré-remplir un message (si lien direct depuis pub)
+     * Utile pour campagnes Google Ads / Meta Ads
+     */
+    const urlParams = new URLSearchParams(window.location.search);
+    const prefilledMessage = urlParams.get('message');
+
+    if (prefilledMessage) {
+      // Ouvrir le chat
+      setTimeout(() => {
+        chat.openChat();
+
+        // Pré-remplir le champ input
+        setTimeout(() => {
+          const input = document.getElementById('ouiglass-chat-input');
+          if (input) {
+            input.value = decodeURIComponent(prefilledMessage);
+            input.focus();
+          }
+        }, 500);
+      }, 1000);
+    }
+
+    /**
+     * EXEMPLE : Tracking Analytics (Google Analytics, Meta Pixel)
+     * À adapter selon vos outils de tracking
+     */
+    // Décommenter si vous utilisez Google Analytics
+    /*
+    function trackChatEvent(action, label) {
+      if (typeof gtag !== 'undefined') {
+        gtag('event', action, {
+          event_category: 'Chat',
+          event_label: label
+        });
+      }
+    }
+
+    // Tracker ouverture chat
+    document.getElementById('ouiglass-chat-toggle').addEventListener('click', () => {
+      if (!chat.isOpen) {
+        trackChatEvent('chat_opened', 'User opened chat');
+      }
+    });
+    */
+
+    /**
+     * EXEMPLE : Personnalisation selon page
+     * Afficher message différent selon la page du site
+     */
+    /*
+    if (window.location.pathname.includes('/services/pare-brise')) {
+      chat.config.greetingMessage = '👋 Vous cherchez un remplacement de pare-brise ? Je peux vous aider !';
+    } else if (window.location.pathname.includes('/urgence')) {
+      chat.config.greetingMessage = '🚨 Urgence pare-brise ? On peut intervenir sous 24h !';
+      chat.config.autoOpen = true; // Ouvrir automatiquement sur page urgence
+    }
+    */
+
+  </script>
+
+</body>
+</html>
