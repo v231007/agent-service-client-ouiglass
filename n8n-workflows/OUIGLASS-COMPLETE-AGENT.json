@@ -1,0 +1,1015 @@
+{
+  "name": "OuiGlass AI Agent - Complete Phase 1",
+  "workflows": [
+    {
+      "name": "OuiGlass - 01 Reception Lead Website",
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "chat",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "webhook-trigger-1",
+          "name": "Webhook Chat",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 1,
+          "position": [250, 300],
+          "webhookId": "ouiglass-chat-webhook"
+        },
+        {
+          "parameters": {
+            "functionCode": "// Valide et nettoie l'input\nconst sessionId = $input.item.json.session_id;\nconst message = $input.item.json.message;\n\nif (!sessionId || !message) {\n  throw new Error('session_id et message sont obligatoires');\n}\n\nreturn {\n  json: {\n    session_id: sessionId,\n    message: message.trim(),\n    timestamp: new Date().toISOString()\n  }\n};"
+          },
+          "id": "function-validate-1",
+          "name": "Extract & Validate Input",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [450, 300]
+        },
+        {
+          "parameters": {
+            "operation": "executeQuery",
+            "query": "INSERT INTO conversations (id, lead_source, status, language)\nVALUES ('{{$json.session_id}}', 'website', 'active', 'fr')\nON CONFLICT (id) DO UPDATE SET updated_at = NOW()\nRETURNING *;"
+          },
+          "id": "supabase-conversation-1",
+          "name": "Get or Create Conversation",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [650, 300],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "operation": "get",
+            "tableId": "messages",
+            "filterType": "manual",
+            "matchCase": "anyFilter",
+            "filters": {
+              "conditions": [
+                {
+                  "keyName": "conversation_id",
+                  "condition": "equals",
+                  "keyValue": "={{$json.session_id}}"
+                }
+              ]
+            },
+            "sort": {
+              "sortProperties": [
+                {
+                  "property": "created_at",
+                  "direction": "ASC"
+                }
+              ]
+            },
+            "options": {
+              "limit": 50
+            }
+          },
+          "id": "supabase-history-1",
+          "name": "Get Message History",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [850, 300],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "functionCode": "// Construit l'historique de conversation pour Claude\nconst existingMessages = $input.all();\nconst history = [];\n\n// Parcourir messages existants\nexistingMessages.forEach(msg => {\n  if (msg.json.role && msg.json.content) {\n    history.push({\n      role: msg.json.role,\n      content: msg.json.content\n    });\n  }\n});\n\n// Ajouter nouveau message user\nhistory.push({\n  role: 'user',\n  content: $node['Webhook Chat'].json.message\n});\n\nreturn {\n  json: {\n    messages: history,\n    session_id: $node['Webhook Chat'].json.session_id\n  }\n};"
+          },
+          "id": "function-context-1",
+          "name": "Build Conversation Context",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [1050, 300]
+        },
+        {
+          "parameters": {
+            "functionCode": "// Prompt système complet pour OuiGlass\nconst systemPrompt = `Tu es l'assistant virtuel de OuiGlass Suisse, spécialiste du remplacement de vitrage automobile en Suisse romande.\n\n=== CONTEXTE BUSINESS ===\nEntreprise : OuiGlass Suisse\nService : Remplacement pare-brise et vitrages automobiles\nZone : Genève, Lausanne, Montreux, Vevey, Nyon, Morges, Yverdon, Fribourg, Neuchâtel, La Chaux-de-Fonds, Delémont, Sion, Martigny, Monthey\nHoraires : Lun-Ven 8h-18h\nPromesse : Intervention 24-48h, zéro avance de frais, gestion assurance complète\n\n=== TON RÔLE PRINCIPAL ===\n1. CONVERTIR chaque lead en RDV confirmé (objectif 80%+)\n2. COLLECTER toutes les informations nécessaires pour l'assurance\n3. RASSURER le client sur la simplicité du process\n4. ÊTRE EFFICACE : messages courts, questions ciblées\n\n=== CHECKLIST INFOS OBLIGATOIRES ===\n□ CLIENT : Nom complet, téléphone, email, adresse exacte (rue, ville, canton, CP)\n□ VÉHICULE : Marque, modèle, année, numéro VIN (17 caractères)\n□ VITRAGE : Type (pare-brise/vitre latérale/lunette/custode), photos, ADAS ?\n□ ASSURANCE : Compagnie (AXA, Mobilière, Allianz, etc.), n° sinistre, n° police\n□ RDV : Date souhaitée, créneau, lieu (domicile/travail)\n\n=== RÈGLES STRICTES ===\n1. Toujours répondre en FRANÇAIS\n2. Ton amical et professionnel, tutoiement naturel\n3. Messages ULTRA-COURTS (2-3 phrases max)\n4. Poser 1-2 questions MAXIMUM par message\n5. Reformuler infos importantes pour confirmation\n6. Insister : \"Zéro avance de frais, on gère tout avec votre assurance\"\n7. NE JAMAIS inventer des infos\n\n=== GESTION OBJECTIONS ===\n\"C'est trop cher ?\" → \"Votre assurance prend en charge, zéro frais pour vous\"\n\"Je n'ai pas le temps\" → \"On vient chez vous ou au travail, ça prend 1h30\"\n\"Je vais réfléchir\" → \"Je comprends. Je vous envoie un récap par email ?\"\n\"Je dois vérifier avec mon assurance\" → \"Pas besoin, on travaille avec toutes les assurances suisses\"\n\n=== ESCALADE VERS HUMAIN SI ===\n- Client très insatisfait/énervé\n- Cas complexe (véhicule ancien >20 ans, vitrage rare)\n- Client insiste pour parler à humain\n- Problème avec assurance\n- Infos incohérentes/suspectes\n\n=== FORMAT RÉPONSE OBLIGATOIRE ===\nRetourne TOUJOURS un JSON valide :\n{\n  \"message\": \"Ton message au client (2-3 phrases max)\",\n  \"infos_collectees\": {\n    \"full_name\": null,\n    \"phone\": null,\n    \"email\": null,\n    \"address\": null,\n    \"city\": null,\n    \"canton\": null,\n    \"postal_code\": null,\n    \"vehicle_make\": null,\n    \"vehicle_model\": null,\n    \"vehicle_year\": null,\n    \"vin\": null,\n    \"glass_type\": null,\n    \"has_adas\": null,\n    \"photos_received\": null,\n    \"insurance_company\": null,\n    \"claim_number\": null,\n    \"policy_number\": null,\n    \"preferred_date\": null\n  },\n  \"checklist_completion\": 0-100,\n  \"next_action\": \"demander_vehicule|demander_photos|demander_assurance|proposer_creneaux|confirmer_rdv|escalade\",\n  \"urgence\": \"normale|haute\",\n  \"notes_internes\": \"\"\n}\n\n=== EXEMPLES ===\nClient: \"Bonjour, j'ai mon pare-brise fissuré\"\nToi: {\"message\": \"Bonjour ! Je suis désolé pour votre pare-brise. Pas de souci, on s'occupe de tout. C'est pour quel véhicule ? (marque et modèle)\", \"infos_collectees\": {\"glass_type\": \"pare-brise\"}, \"checklist_completion\": 5, \"next_action\": \"demander_vehicule\"}\n\nClient: \"BMW Serie 3 de 2020\"\nToi: {\"message\": \"Parfait ! Pour commander la bonne pièce, j'ai besoin du numéro VIN (17 caractères, sur la carte grise). Pendant ce temps, pouvez-vous m'envoyer 2-3 photos du pare-brise par email ?\", \"infos_collectees\": {\"vehicle_make\": \"BMW\", \"vehicle_model\": \"Serie 3\", \"vehicle_year\": 2020}, \"checklist_completion\": 25, \"next_action\": \"demander_photos\"}\n`;\n\nreturn {\n  json: {\n    system_prompt: systemPrompt\n  }\n};"
+          },
+          "id": "function-prompt-1",
+          "name": "Load System Prompt",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [1250, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "https://api.anthropic.com/v1/messages",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendHeaders": true,
+            "headerParameters": {
+              "parameters": [
+                {
+                  "name": "anthropic-version",
+                  "value": "2023-06-01"
+                },
+                {
+                  "name": "content-type",
+                  "value": "application/json"
+                }
+              ]
+            },
+            "sendBody": true,
+            "contentType": "json",
+            "bodyParameters": {
+              "parameters": []
+            },
+            "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 1024,\n  \"system\": {{ $node['Load System Prompt'].json.system_prompt }},\n  \"messages\": {{ $node['Build Conversation Context'].json.messages }}\n}",
+            "options": {
+              "timeout": 30000
+            }
+          },
+          "id": "http-claude-1",
+          "name": "Claude API",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.1,
+          "position": [1450, 300],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "{{CLAUDE_CREDENTIAL_ID}}",
+              "name": "Claude API"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "functionCode": "// Parse la réponse de Claude\nconst response = $input.item.json;\nconst messageText = response.content[0].text;\n\n// Tenter de parser le JSON\nlet parsed;\ntry {\n  parsed = JSON.parse(messageText);\n} catch (e) {\n  // Fallback si pas JSON\n  parsed = {\n    message: messageText,\n    infos_collectees: {},\n    checklist_completion: 0,\n    next_action: 'continue',\n    urgence: 'normale',\n    notes_internes: 'Erreur parsing JSON'\n  };\n}\n\n// Ajouter session_id pour la suite\nparsed.session_id = $node['Webhook Chat'].json.session_id;\n\nreturn { json: parsed };"
+          },
+          "id": "function-parse-1",
+          "name": "Parse LLM Response",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [1650, 300]
+        },
+        {
+          "parameters": {
+            "operation": "insert",
+            "tableId": "messages",
+            "dataMode": "defineBelow",
+            "columnsUi": {
+              "columnValues": [
+                {
+                  "column": "conversation_id",
+                  "value": "={{$node['Webhook Chat'].json.session_id}}"
+                },
+                {
+                  "column": "role",
+                  "value": "user"
+                },
+                {
+                  "column": "content",
+                  "value": "={{$node['Webhook Chat'].json.message}}"
+                }
+              ]
+            }
+          },
+          "id": "supabase-user-msg-1",
+          "name": "Save User Message",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [1850, 300],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "operation": "insert",
+            "tableId": "messages",
+            "dataMode": "defineBelow",
+            "columnsUi": {
+              "columnValues": [
+                {
+                  "column": "conversation_id",
+                  "value": "={{$node['Webhook Chat'].json.session_id}}"
+                },
+                {
+                  "column": "role",
+                  "value": "assistant"
+                },
+                {
+                  "column": "content",
+                  "value": "={{$json.message}}"
+                },
+                {
+                  "column": "metadata",
+                  "value": "={{ {\"completion\": $json.checklist_completion, \"next_action\": $json.next_action} }}"
+                }
+              ]
+            }
+          },
+          "id": "supabase-bot-msg-1",
+          "name": "Save Assistant Message",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [2050, 300],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "number": [
+                {
+                  "value1": "={{$json.checklist_completion}}",
+                  "operation": "largerEqual",
+                  "value2": 100
+                }
+              ]
+            }
+          },
+          "id": "if-complete-1",
+          "name": "Check If Info Complete",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 1,
+          "position": [2250, 300]
+        },
+        {
+          "parameters": {
+            "operation": "executeQuery",
+            "query": "INSERT INTO leads (conversation_id, full_name, phone, email, address, city, canton, postal_code, vehicle_make, vehicle_model, vehicle_year, vin, glass_type, has_adas, insurance_company, claim_number, policy_number, status)\nVALUES (\n  '{{$json.session_id}}',\n  {{$json.infos_collectees.full_name ? \"'\" + $json.infos_collectees.full_name + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.phone ? \"'\" + $json.infos_collectees.phone + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.email ? \"'\" + $json.infos_collectees.email + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.address ? \"'\" + $json.infos_collectees.address + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.city ? \"'\" + $json.infos_collectees.city + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.canton ? \"'\" + $json.infos_collectees.canton + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.postal_code ? \"'\" + $json.infos_collectees.postal_code + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.vehicle_make ? \"'\" + $json.infos_collectees.vehicle_make + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.vehicle_model ? \"'\" + $json.infos_collectees.vehicle_model + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.vehicle_year || \"NULL\"}},\n  {{$json.infos_collectees.vin ? \"'\" + $json.infos_collectees.vin + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.glass_type ? \"'\" + $json.infos_collectees.glass_type + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.has_adas || \"NULL\"}},\n  {{$json.infos_collectees.insurance_company ? \"'\" + $json.infos_collectees.insurance_company + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.claim_number ? \"'\" + $json.infos_collectees.claim_number + \"'\" : \"NULL\"}},\n  {{$json.infos_collectees.policy_number ? \"'\" + $json.infos_collectees.policy_number + \"'\" : \"NULL\"}},\n  'info_complete'\n)\nON CONFLICT (conversation_id) DO UPDATE SET\n  full_name = COALESCE(EXCLUDED.full_name, leads.full_name),\n  phone = COALESCE(EXCLUDED.phone, leads.phone),\n  email = COALESCE(EXCLUDED.email, leads.email),\n  address = COALESCE(EXCLUDED.address, leads.address),\n  city = COALESCE(EXCLUDED.city, leads.city),\n  canton = COALESCE(EXCLUDED.canton, leads.canton),\n  postal_code = COALESCE(EXCLUDED.postal_code, leads.postal_code),\n  vehicle_make = COALESCE(EXCLUDED.vehicle_make, leads.vehicle_make),\n  vehicle_model = COALESCE(EXCLUDED.vehicle_model, leads.vehicle_model),\n  vehicle_year = COALESCE(EXCLUDED.vehicle_year, leads.vehicle_year),\n  vin = COALESCE(EXCLUDED.vin, leads.vin),\n  glass_type = COALESCE(EXCLUDED.glass_type, leads.glass_type),\n  has_adas = COALESCE(EXCLUDED.has_adas, leads.has_adas),\n  insurance_company = COALESCE(EXCLUDED.insurance_company, leads.insurance_company),\n  claim_number = COALESCE(EXCLUDED.claim_number, leads.claim_number),\n  policy_number = COALESCE(EXCLUDED.policy_number, leads.policy_number),\n  status = EXCLUDED.status,\n  updated_at = NOW()\nRETURNING *;"
+          },
+          "id": "supabase-lead-1",
+          "name": "Update or Create Lead",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [2450, 200],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{$env.N8N_WEBHOOK_BASE_URL}}/webhook/create-appointment",
+            "sendBody": true,
+            "contentType": "json",
+            "jsonBody": "={\n  \"lead_id\": \"{{$json.id}}\",\n  \"session_id\": \"{{$json.conversation_id}}\"\n}",
+            "options": {}
+          },
+          "id": "http-trigger-rdv-1",
+          "name": "Trigger RDV Workflow",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.1,
+          "position": [2650, 200]
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={\n  \"message\": \"{{$node['Parse LLM Response'].json.message}}\",\n  \"completion\": {{$node['Parse LLM Response'].json.checklist_completion}},\n  \"session_id\": \"{{$node['Webhook Chat'].json.session_id}}\",\n  \"next_action\": \"{{$node['Parse LLM Response'].json.next_action}}\"\n}"
+          },
+          "id": "webhook-response-1",
+          "name": "Respond to Webhook",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1,
+          "position": [2450, 400]
+        }
+      ],
+      "connections": {
+        "Webhook Chat": {
+          "main": [
+            [
+              {
+                "node": "Extract & Validate Input",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Extract & Validate Input": {
+          "main": [
+            [
+              {
+                "node": "Get or Create Conversation",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Get or Create Conversation": {
+          "main": [
+            [
+              {
+                "node": "Get Message History",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Get Message History": {
+          "main": [
+            [
+              {
+                "node": "Build Conversation Context",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Build Conversation Context": {
+          "main": [
+            [
+              {
+                "node": "Load System Prompt",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Load System Prompt": {
+          "main": [
+            [
+              {
+                "node": "Claude API",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Claude API": {
+          "main": [
+            [
+              {
+                "node": "Parse LLM Response",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Parse LLM Response": {
+          "main": [
+            [
+              {
+                "node": "Save User Message",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Save User Message": {
+          "main": [
+            [
+              {
+                "node": "Save Assistant Message",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Save Assistant Message": {
+          "main": [
+            [
+              {
+                "node": "Check If Info Complete",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Check If Info Complete": {
+          "main": [
+            [
+              {
+                "node": "Update or Create Lead",
+                "type": "main",
+                "index": 0
+              }
+            ],
+            [
+              {
+                "node": "Respond to Webhook",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Update or Create Lead": {
+          "main": [
+            [
+              {
+                "node": "Trigger RDV Workflow",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Trigger RDV Workflow": {
+          "main": [
+            [
+              {
+                "node": "Respond to Webhook",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true,
+        "saveExecutionProgress": true,
+        "saveDataSuccessExecution": "all",
+        "saveDataErrorExecution": "all"
+      },
+      "staticData": null,
+      "tags": [],
+      "pinData": {},
+      "versionId": "1"
+    },
+    {
+      "name": "OuiGlass - 02 Creation RDV",
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "create-appointment",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "webhook-rdv",
+          "name": "Webhook Create Appointment",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 1,
+          "position": [250, 300]
+        },
+        {
+          "parameters": {
+            "operation": "get",
+            "tableId": "leads",
+            "filterType": "manual",
+            "matchCase": "anyFilter",
+            "filters": {
+              "conditions": [
+                {
+                  "keyName": "id",
+                  "condition": "equals",
+                  "keyValue": "={{$json.lead_id}}"
+                }
+              ]
+            }
+          },
+          "id": "supabase-get-lead",
+          "name": "Get Lead Info",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [450, 300],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "functionCode": "// Calcule 3 créneaux optimaux selon la zone\nconst lead = $input.item.json;\nconst canton = lead.canton;\n\n// Mapping canton → zone\nconst cantonToZone = {\n  'Genève': 'geneve',\n  'Vaud': 'lausanne',\n  'Valais': 'valais',\n  'Fribourg': 'fribourg',\n  'Neuchâtel': 'neuchatel',\n  'Jura': 'jura'\n};\n\nconst zone = cantonToZone[canton] || 'lausanne';\n\n// Jours préférés par zone (optimisation planning)\nconst preferredDays = {\n  'geneve': [1, 3, 5],      // Lun, Mer, Ven\n  'lausanne': [2, 4],       // Mar, Jeu\n  'valais': [3],            // Mer\n  'fribourg': [2, 5],       // Mar, Ven\n  'neuchatel': [1, 4],      // Lun, Jeu\n  'jura': [5]               // Ven\n};\n\n// Durée selon type vitrage\nconst durations = {\n  'pare-brise': lead.has_adas ? 90 : 60,\n  'vitre-laterale-avant-gauche': 45,\n  'vitre-laterale-avant-droite': 45,\n  'vitre-laterale-arriere-gauche': 45,\n  'vitre-laterale-arriere-droite': 45,\n  'lunette-arriere': 45,\n  'custode': 30\n};\n\nconst duration = durations[lead.glass_type] || 60;\n\n// Générer 3 créneaux\nconst now = new Date();\nconst slots = [];\n\nfor (let i = 1; i <= 14; i++) {\n  const date = new Date(now);\n  date.setDate(date.getDate() + i);\n  const dayOfWeek = date.getDay();\n\n  // Skip dimanche (0) et samedi (6)\n  if (dayOfWeek === 0 || dayOfWeek === 6) continue;\n\n  // Priorité aux jours préférés de la zone\n  if (preferredDays[zone] && preferredDays[zone].includes(dayOfWeek)) {\n    // Créneaux : 9h, 11h, 14h, 16h\n    const times = ['09:00', '11:00', '14:00', '16:00'];\n\n    times.forEach(time => {\n      const slotDate = new Date(date);\n      const [hour, minute] = time.split(':');\n      slotDate.setHours(parseInt(hour), parseInt(minute), 0, 0);\n\n      slots.push({\n        datetime: slotDate.toISOString(),\n        zone: zone,\n        display: `${date.toLocaleDateString('fr-CH', {weekday: 'long', day: '2-digit', month: '2-digit'})} à ${time}`,\n        duration: duration\n      });\n    });\n  }\n\n  if (slots.length >= 3) break;\n}\n\n// Si pas assez de créneaux, ajouter autres jours\nif (slots.length < 3) {\n  for (let i = 1; i <= 14 && slots.length < 3; i++) {\n    const date = new Date(now);\n    date.setDate(date.getDate() + i);\n    const dayOfWeek = date.getDay();\n\n    if (dayOfWeek === 0 || dayOfWeek === 6) continue;\n\n    const times = ['09:00', '14:00'];\n    times.forEach(time => {\n      if (slots.length >= 3) return;\n      \n      const slotDate = new Date(date);\n      const [hour, minute] = time.split(':');\n      slotDate.setHours(parseInt(hour), parseInt(minute), 0, 0);\n\n      slots.push({\n        datetime: slotDate.toISOString(),\n        zone: zone,\n        display: `${date.toLocaleDateString('fr-CH', {weekday: 'long', day: '2-digit', month: '2-digit'})} à ${time}`,\n        duration: duration\n      });\n    });\n  }\n}\n\nreturn {\n  json: {\n    lead: lead,\n    proposed_slots: slots.slice(0, 3),\n    zone: zone,\n    duration: duration\n  }\n};"
+          },
+          "id": "function-slots",
+          "name": "Calculate Available Slots",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [650, 300]
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "https://api.anthropic.com/v1/messages",
+            "authentication": "predefinedCredentialType",
+            "nodeCredentialType": "httpHeaderAuth",
+            "sendHeaders": true,
+            "headerParameters": {
+              "parameters": [
+                {
+                  "name": "anthropic-version",
+                  "value": "2023-06-01"
+                },
+                {
+                  "name": "content-type",
+                  "value": "application/json"
+                }
+              ]
+            },
+            "sendBody": true,
+            "contentType": "json",
+            "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 512,\n  \"system\": \"Tu es l'assistant OuiGlass. Formule une proposition de créneaux de manière amicale et claire. Retourne uniquement le message, pas de JSON.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Voici 3 créneaux disponibles pour l'intervention : 1) {{$json.proposed_slots[0].display}}, 2) {{$json.proposed_slots[1].display}}, 3) {{$json.proposed_slots[2].display}}. Formule un message sympa pour proposer ces créneaux au client {{$json.lead.full_name}}.\"\n    }\n  ]\n}",
+            "options": {}
+          },
+          "id": "http-claude-slots",
+          "name": "Generate Slots Message",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.1,
+          "position": [850, 300],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "{{CLAUDE_CREDENTIAL_ID}}",
+              "name": "Claude API"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "functionCode": "// Parse réponse Claude et prépare données\nconst response = $input.item.json;\nconst message = response.content[0].text;\n\nreturn {\n  json: {\n    message: message,\n    slots: $node['Calculate Available Slots'].json.proposed_slots,\n    lead_id: $node['Webhook Create Appointment'].json.lead_id,\n    session_id: $node['Webhook Create Appointment'].json.session_id\n  }\n};"
+          },
+          "id": "function-prepare-response",
+          "name": "Prepare Response",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [1050, 300]
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={\n  \"message\": \"{{$json.message}}\",\n  \"slots\": {{$json.slots}},\n  \"action\": \"choose_slot\",\n  \"session_id\": \"{{$json.session_id}}\"\n}"
+          },
+          "id": "webhook-response-rdv",
+          "name": "Respond with Slots",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1,
+          "position": [1250, 300]
+        }
+      ],
+      "connections": {
+        "Webhook Create Appointment": {
+          "main": [
+            [
+              {
+                "node": "Get Lead Info",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Get Lead Info": {
+          "main": [
+            [
+              {
+                "node": "Calculate Available Slots",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Calculate Available Slots": {
+          "main": [
+            [
+              {
+                "node": "Generate Slots Message",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Generate Slots Message": {
+          "main": [
+            [
+              {
+                "node": "Prepare Response",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Prepare Response": {
+          "main": [
+            [
+              {
+                "node": "Respond with Slots",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "staticData": null,
+      "tags": [],
+      "pinData": {},
+      "versionId": "1"
+    },
+    {
+      "name": "OuiGlass - 03 Confirm RDV",
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "confirm-appointment",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "webhook-confirm",
+          "name": "Webhook Confirm",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 1,
+          "position": [250, 300]
+        },
+        {
+          "parameters": {
+            "operation": "get",
+            "tableId": "leads",
+            "filterType": "manual",
+            "matchCase": "anyFilter",
+            "filters": {
+              "conditions": [
+                {
+                  "keyName": "id",
+                  "condition": "equals",
+                  "keyValue": "={{$json.lead_id}}"
+                }
+              ]
+            }
+          },
+          "id": "supabase-get-lead-confirm",
+          "name": "Get Lead",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [450, 300],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "resource": "event",
+            "operation": "create",
+            "calendarId": {
+              "__rl": true,
+              "value": "primary",
+              "mode": "list",
+              "cachedResultName": "primary"
+            },
+            "start": "={{$node['Webhook Confirm'].json.chosen_slot}}",
+            "end": "={{new Date(new Date($node['Webhook Confirm'].json.chosen_slot).getTime() + 90*60000).toISOString()}}",
+            "summary": "=RDV {{$json.full_name}} - {{$json.vehicle_make}} {{$json.vehicle_model}}",
+            "description": "=CLIENT: {{$json.full_name}}\nTél: {{$json.phone}}\nEmail: {{$json.email}}\nAdresse: {{$json.address}}, {{$json.city}}\n\nVÉHICULE: {{$json.vehicle_make}} {{$json.vehicle_model}} ({{$json.vehicle_year}})\nVIN: {{$json.vin}}\n\nVITRAGE: {{$json.glass_type}}\nADAS: {{$json.has_adas ? 'Oui' : 'Non'}}\n\nASSURANCE: {{$json.insurance_company}}\nN° sinistre: {{$json.claim_number}}\nN° police: {{$json.policy_number}}",
+            "location": "={{$json.address}}, {{$json.city}}",
+            "options": {}
+          },
+          "id": "google-calendar-create",
+          "name": "Create Google Calendar Event",
+          "type": "n8n-nodes-base.googleCalendar",
+          "typeVersion": 1,
+          "position": [650, 300],
+          "credentials": {
+            "googleCalendarOAuth2Api": {
+              "id": "{{GOOGLE_CALENDAR_CREDENTIAL_ID}}",
+              "name": "Google Calendar OAuth2"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "operation": "insert",
+            "tableId": "appointments",
+            "dataMode": "defineBelow",
+            "columnsUi": {
+              "columnValues": [
+                {
+                  "column": "lead_id",
+                  "value": "={{$node['Webhook Confirm'].json.lead_id}}"
+                },
+                {
+                  "column": "scheduled_at",
+                  "value": "={{$node['Webhook Confirm'].json.chosen_slot}}"
+                },
+                {
+                  "column": "zone",
+                  "value": "={{$node['Webhook Confirm'].json.zone}}"
+                },
+                {
+                  "column": "status",
+                  "value": "scheduled"
+                },
+                {
+                  "column": "duration_minutes",
+                  "value": "={{$node['Webhook Confirm'].json.duration || 90}}"
+                },
+                {
+                  "column": "external_id",
+                  "value": "={{$json.id}}"
+                }
+              ]
+            }
+          },
+          "id": "supabase-create-appointment",
+          "name": "Create Appointment",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [850, 300],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "method": "POST",
+            "url": "={{$env.N8N_WEBHOOK_BASE_URL}}/webhook/notification",
+            "sendBody": true,
+            "contentType": "json",
+            "jsonBody": "={\n  \"type\": \"new_appointment\",\n  \"client_name\": \"{{$node['Get Lead'].json.full_name}}\",\n  \"datetime\": \"{{$node['Webhook Confirm'].json.chosen_slot}}\",\n  \"zone\": \"{{$node['Webhook Confirm'].json.zone}}\",\n  \"vehicle\": \"{{$node['Get Lead'].json.vehicle_make}} {{$node['Get Lead'].json.vehicle_model}}\",\n  \"glass_type\": \"{{$node['Get Lead'].json.glass_type}}\"\n}",
+            "options": {}
+          },
+          "id": "http-notify",
+          "name": "Send Notification",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.1,
+          "position": [1050, 300]
+        },
+        {
+          "parameters": {
+            "operation": "executeQuery",
+            "query": "UPDATE conversations SET status = 'rdv_confirmed' WHERE id = (SELECT conversation_id FROM leads WHERE id = '{{$node['Webhook Confirm'].json.lead_id}}');\nUPDATE leads SET status = 'rdv_confirmed' WHERE id = '{{$node['Webhook Confirm'].json.lead_id}}';"
+          },
+          "id": "supabase-update-status",
+          "name": "Update Status",
+          "type": "n8n-nodes-base.supabase",
+          "typeVersion": 1,
+          "position": [1250, 300],
+          "credentials": {
+            "supabaseApi": {
+              "id": "{{SUPABASE_CREDENTIAL_ID}}",
+              "name": "Supabase OuiGlass"
+            }
+          }
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={\n  \"success\": true,\n  \"message\": \"Votre RDV est confirmé pour le {{new Date($node['Webhook Confirm'].json.chosen_slot).toLocaleDateString('fr-CH', {weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric'})}} à {{new Date($node['Webhook Confirm'].json.chosen_slot).toLocaleTimeString('fr-CH', {hour: '2-digit', minute: '2-digit'})}}. Vous allez recevoir un email de confirmation. À bientôt !\",\n  \"appointment_id\": \"{{$node['Create Appointment'].json.id}}\"\n}"
+          },
+          "id": "webhook-response-confirm",
+          "name": "Respond Success",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1,
+          "position": [1450, 300]
+        }
+      ],
+      "connections": {
+        "Webhook Confirm": {
+          "main": [
+            [
+              {
+                "node": "Get Lead",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Get Lead": {
+          "main": [
+            [
+              {
+                "node": "Create Google Calendar Event",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Create Google Calendar Event": {
+          "main": [
+            [
+              {
+                "node": "Create Appointment",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Create Appointment": {
+          "main": [
+            [
+              {
+                "node": "Send Notification",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Send Notification": {
+          "main": [
+            [
+              {
+                "node": "Update Status",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Update Status": {
+          "main": [
+            [
+              {
+                "node": "Respond Success",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "staticData": null,
+      "tags": [],
+      "pinData": {},
+      "versionId": "1"
+    },
+    {
+      "name": "OuiGlass - 04 Notifications",
+      "nodes": [
+        {
+          "parameters": {
+            "httpMethod": "POST",
+            "path": "notification",
+            "responseMode": "responseNode",
+            "options": {}
+          },
+          "id": "webhook-notification",
+          "name": "Webhook Notification",
+          "type": "n8n-nodes-base.webhook",
+          "typeVersion": 1,
+          "position": [250, 300]
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "string": [
+                {
+                  "value1": "={{$json.type}}",
+                  "value2": "new_appointment"
+                }
+              ]
+            }
+          },
+          "id": "switch-notification-type",
+          "name": "Switch Notification Type",
+          "type": "n8n-nodes-base.switch",
+          "typeVersion": 1,
+          "position": [450, 300]
+        },
+        {
+          "parameters": {
+            "functionCode": "// Format notification nouveau RDV\nconst data = $input.item.json;\nconst date = new Date(data.datetime);\nconst formattedDate = date.toLocaleDateString('fr-CH', {weekday: 'long', day: '2-digit', month: '2-digit'});\nconst formattedTime = date.toLocaleTimeString('fr-CH', {hour: '2-digit', minute: '2-digit'});\n\nconst message = `🎯 Nouveau RDV confirmé !\n\nClient : ${data.client_name}\nVéhicule : ${data.vehicle}\nVitrage : ${data.glass_type}\nDate : ${formattedDate} à ${formattedTime}\nZone : ${data.zone}\n\nRDV créé dans Google Calendar.`;\n\nreturn {\n  json: {\n    message: message,\n    phone: $env.NOTIFICATION_WHATSAPP\n  }\n};"
+          },
+          "id": "function-format-new-rdv",
+          "name": "Format New RDV",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [650, 200]
+        },
+        {
+          "parameters": {
+            "authentication": "genericCredentialType",
+            "genericAuthType": "httpHeaderAuth",
+            "method": "POST",
+            "url": "https://graph.facebook.com/v18.0/{{$env.WHATSAPP_PHONE_NUMBER_ID}}/messages",
+            "sendHeaders": true,
+            "headerParameters": {
+              "parameters": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            },
+            "sendBody": true,
+            "contentType": "json",
+            "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{$json.phone}}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"{{$json.message}}\"\n  }\n}",
+            "options": {}
+          },
+          "id": "http-whatsapp",
+          "name": "Send WhatsApp",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 4.1,
+          "position": [850, 200],
+          "credentials": {
+            "httpHeaderAuth": {
+              "id": "{{WHATSAPP_CREDENTIAL_ID}}",
+              "name": "WhatsApp API"
+            }
+          },
+          "notes": "OPTIONNEL Phase 1 - Remplacer par Send Email si pas WhatsApp"
+        },
+        {
+          "parameters": {
+            "respondWith": "json",
+            "responseBody": "={\"success\": true, \"notified\": true}"
+          },
+          "id": "webhook-response-notification",
+          "name": "Respond",
+          "type": "n8n-nodes-base.respondToWebhook",
+          "typeVersion": 1,
+          "position": [1050, 300]
+        }
+      ],
+      "connections": {
+        "Webhook Notification": {
+          "main": [
+            [
+              {
+                "node": "Switch Notification Type",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Switch Notification Type": {
+          "main": [
+            [
+              {
+                "node": "Format New RDV",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Format New RDV": {
+          "main": [
+            [
+              {
+                "node": "Send WhatsApp",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        },
+        "Send WhatsApp": {
+          "main": [
+            [
+              {
+                "node": "Respond",
+                "type": "main",
+                "index": 0
+              }
+            ]
+          ]
+        }
+      },
+      "settings": {
+        "executionOrder": "v1"
+      },
+      "staticData": null,
+      "tags": [],
+      "pinData": {},
+      "versionId": "1"
+    }
+  ]
+}
