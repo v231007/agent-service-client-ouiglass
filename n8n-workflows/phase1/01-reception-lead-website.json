@@ -1,0 +1,302 @@
+{
+  "name": "OuiGlass - 01 Reception Lead Website",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Valide et nettoie l'input\nconst sessionId = $input.item.json.session_id;\nconst message = $input.item.json.message;\n\nif (!sessionId || !message) {\n  throw new Error('session_id et message sont obligatoires');\n}\n\nreturn {\n  json: {\n    session_id: sessionId,\n    message: message.trim(),\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "function-validate",
+      "name": "Extract & Validate Input",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (id, lead_source, status, language)\nVALUES ('{{$json.session_id}}', 'website', 'active', 'fr')\nON CONFLICT (id) DO UPDATE SET updated_at = NOW()\nRETURNING *;"
+      },
+      "id": "supabase-conversation",
+      "name": "Get or Create Conversation",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "1",
+          "name": "Supabase OuiGlass"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Charge le prompt système (version courte)\n// Pour la version complète, voir prompts/system-prompt-main.md\n\nconst systemPrompt = `Tu es l'assistant virtuel de OuiGlass Suisse, spécialiste du remplacement de vitrage automobile.\n\nTON RÔLE :\n1. Convertir chaque lead en RDV confirmé\n2. Collecter TOUTES les informations nécessaires pour l'assurance\n3. Être ultra-efficace : pas de blabla, aller à l'essentiel\n\nINFOS OBLIGATOIRES À COLLECTER :\n□ CLIENT : Nom complet, téléphone, email, adresse exacte (rue, ville, canton, CP)\n□ VÉHICULE : Marque, modèle, année, numéro VIN\n□ VITRAGE : Type (pare-brise/vitre latérale/lunette/custode), photos, ADAS ?\n□ ASSURANCE : Compagnie, n° sinistre, n° police\n□ RDV : Date souhaitée, créneau horaire, lieu (domicile/travail)\n\nRÈGLES STRICTES :\n- Messages COURTS (2-3 phrases max)\n- Poser 1-2 questions MAX par message\n- Ton amical et professionnel, tutoiement\n- Toujours en français\n- Insister : \"Zéro avance de frais, on gère tout avec votre assurance\"\n- NE JAMAIS inventer des infos\n\nFORMAT DE RÉPONSE OBLIGATOIRE (JSON valide) :\n{\n  \"message\": \"Ton message au client (2-3 phrases max)\",\n  \"infos_collectees\": {\n    \"full_name\": null,\n    \"phone\": null,\n    \"email\": null,\n    \"address\": null,\n    \"city\": null,\n    \"canton\": null,\n    \"vehicle_make\": null,\n    \"vehicle_model\": null,\n    \"vehicle_year\": null,\n    \"vin\": null,\n    \"glass_type\": null,\n    \"has_adas\": null,\n    \"insurance_company\": null,\n    \"claim_number\": null,\n    \"policy_number\": null\n  },\n  \"checklist_completion\": 0,\n  \"next_action\": \"demander_vehicule\",\n  \"urgence\": \"normale\",\n  \"notes_internes\": \"\"\n}\n\nEXEMPLES :\n\nClient: \"Bonjour, j'ai mon pare-brise fissuré\"\nToi: {\"message\": \"Bonjour ! Je suis désolé pour votre pare-brise. Pas de souci, on s'occupe de tout. C'est pour quel véhicule ? (marque et modèle)\", \"infos_collectees\": {\"glass_type\": \"pare-brise\"}, \"checklist_completion\": 5, \"next_action\": \"demander_vehicule\"}\n\nClient: \"BMW Serie 3 de 2020\"\nToi: {\"message\": \"Parfait ! Pour commander la bonne pièce, j'ai besoin du numéro VIN (17 caractères, sur la carte grise). Pendant ce temps, pouvez-vous m'envoyer 2-3 photos du pare-brise par email ?\", \"infos_collectees\": {\"vehicle_make\": \"BMW\", \"vehicle_model\": \"Serie 3\", \"vehicle_year\": 2020}, \"checklist_completion\": 25, \"next_action\": \"demander_photos\"}\n`;\n\nreturn {\n  json: {\n    system_prompt: systemPrompt,\n    user_message: $input.item.json.message\n  }\n};"
+      },
+      "id": "function-prompt",
+      "name": "Load System Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "claude-sonnet-4-20250514"
+            },
+            {
+              "name": "max_tokens",
+              "value": "1024"
+            },
+            {
+              "name": "system",
+              "value": "={{$json.system_prompt}}"
+            },
+            {
+              "name": "messages",
+              "value": "=[{\"role\": \"user\", \"content\": \"{{$json.user_message}}\"}]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-claude",
+      "name": "Claude API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1050, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2",
+          "name": "Claude API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extrait le texte de la réponse Claude\nconst response = $input.item.json;\nconst messageText = response.content[0].text;\n\n// Tenter de parser le JSON\nlet parsed;\ntry {\n  parsed = JSON.parse(messageText);\n} catch (e) {\n  // Si pas JSON, fallback\n  parsed = {\n    message: messageText,\n    infos_collectees: {},\n    checklist_completion: 0,\n    next_action: 'continue'\n  };\n}\n\nreturn { json: parsed };"
+      },
+      "id": "function-parse",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "messages",
+        "dataMode": "defineBelow",
+        "columnsUi": {
+          "columnValues": [
+            {
+              "column": "conversation_id",
+              "value": "={{$node['Webhook Chat'].json.session_id}}"
+            },
+            {
+              "column": "role",
+              "value": "user"
+            },
+            {
+              "column": "content",
+              "value": "={{$node['Webhook Chat'].json.message}}"
+            }
+          ]
+        }
+      },
+      "id": "supabase-user-msg",
+      "name": "Save User Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1450, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "1",
+          "name": "Supabase OuiGlass"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "messages",
+        "dataMode": "defineBelow",
+        "columnsUi": {
+          "columnValues": [
+            {
+              "column": "conversation_id",
+              "value": "={{$node['Webhook Chat'].json.session_id}}"
+            },
+            {
+              "column": "role",
+              "value": "assistant"
+            },
+            {
+              "column": "content",
+              "value": "={{$json.message}}"
+            }
+          ]
+        }
+      },
+      "id": "supabase-bot-msg",
+      "name": "Save Assistant Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1650, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "1",
+          "name": "Supabase OuiGlass"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"message\": \"{{$json.message}}\",\n  \"completion\": {{$json.checklist_completion}},\n  \"session_id\": \"{{$node['Webhook Chat'].json.session_id}}\"\n}"
+      },
+      "id": "webhook-response",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Chat": {
+      "main": [
+        [
+          {
+            "node": "Extract & Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Get or Create Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get or Create Conversation": {
+      "main": [
+        [
+          {
+            "node": "Load System Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load System Prompt": {
+      "main": [
+        [
+          {
+            "node": "Claude API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Save User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save User Message": {
+      "main": [
+        [
+          {
+            "node": "Save Assistant Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Assistant Message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-01-17T12:00:00.000Z",
+      "updatedAt": "2025-01-17T12:00:00.000Z",
+      "id": "1",
+      "name": "OuiGlass Phase 1"
+    }
+  ],
+  "pinData": {},
+  "versionId": "1"
+}
