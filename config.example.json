@@ -1,0 +1,37 @@
+{
+  "supabase": {
+    "host": "https://VOTRE-PROJET.supabase.co",
+    "service_role_key": "eyJ...",
+    "anon_key": "eyJ... (optionnel, non utilisé en Phase 1)"
+  },
+  "llm": {
+    "provider": "anthropic",
+    "api_key": "sk-ant-...",
+    "model": "claude-3-5-sonnet-20241022",
+    "max_tokens": 1024,
+    "alternative_openai": {
+      "provider": "openai",
+      "api_key": "sk-...",
+      "model": "gpt-4",
+      "url": "https://api.openai.com/v1/chat/completions"
+    }
+  },
+  "n8n": {
+    "webhook_url": "https://your-instance.app.n8n.cloud/webhook/chat",
+    "workflow_id": "auto-generated-by-n8n"
+  },
+  "app": {
+    "name": "OuiGlass Suisse Chat Agent",
+    "version": "1.0.0-mvp-phase1",
+    "language_default": "fr",
+    "message_history_limit": 10
+  },
+  "lead_fields": [
+    "vehicle_make",
+    "vehicle_model",
+    "vehicle_year",
+    "glass_type",
+    "city",
+    "full_name"
+  ]
+}

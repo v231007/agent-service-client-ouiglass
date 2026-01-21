@@ -1,0 +1,270 @@
+{
+  "name": "OuiGlass Suisse - MVP Chat Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ouiglass-chat"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Récupère le body du webhook\nconst body = $input.item.json.body;\n\n// Valide session_id et message\nif (!body || !body.session_id || typeof body.session_id !== 'string' || body.session_id.trim() === '') {\n  throw new Error('session_id manquant ou invalide');\n}\n\nif (!body.message || typeof body.message !== 'string' || body.message.trim() === '') {\n  throw new Error('message manquant ou invalide');\n}\n\n// Retourne les données validées\nreturn {\n  session_id: body.session_id.trim(),\n  message: body.message.trim()\n};"
+      },
+      "id": "node-validate",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (session_id)\nVALUES ('{{ $json.session_id }}')\nON CONFLICT (session_id) DO UPDATE SET updated_at = now()\nRETURNING id, session_id, created_at, updated_at;"
+      },
+      "id": "node-get-conversation",
+      "name": "Get or Create Conversation",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-ouiglass",
+          "name": "Supabase OuiGlass"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (conversation_id, role, content)\nVALUES (\n  '{{ $json.id }}',\n  'user',\n  '{{ $('Validate Input').item.json.message }}'\n)\nRETURNING id, conversation_id, role, content, created_at;"
+      },
+      "id": "node-insert-user-msg",
+      "name": "Insert User Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-ouiglass",
+          "name": "Supabase OuiGlass"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT role, content, created_at\nFROM messages\nWHERE conversation_id = '{{ $('Get or Create Conversation').item.json.id }}'\nORDER BY created_at ASC\nLIMIT 10;"
+      },
+      "id": "node-get-messages",
+      "name": "Get Last N Messages",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-ouiglass",
+          "name": "Supabase OuiGlass"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Récupère l'historique des messages\nconst history = $('Get Last N Messages').all();\n\n// Construit le tableau de messages pour le LLM\nconst messages = history.map(item => ({\n  role: item.json.role,\n  content: item.json.content\n}));\n\n// Prompt système\nconst systemPrompt = `Tu es l'assistant virtuel de OuiGlass Suisse, spécialiste du remplacement de vitrage automobile.\n\n**RÈGLES STRICTES :**\n1. Réponds UNIQUEMENT en JSON valide, sans texte avant ou après\n2. Pose UNE SEULE question à la fois\n3. Ton : professionnel et sympathique, tutoiement\n4. Messages très courts (2-3 phrases max)\n5. Langue : français par défaut, anglais si le client écrit en anglais\n\n**OBJECTIF :** Collecter progressivement ces 6 informations (dans l'ordre recommandé) :\n1. vehicle_make (marque du véhicule : Renault, Peugeot, BMW, etc.)\n2. vehicle_model (modèle : Clio, 208, Série 3, etc.)\n3. vehicle_year (année : 2018, 2020, etc.)\n4. glass_type (type de vitre : pare-brise, vitre latérale, lunette arrière, autre)\n5. city (ville en Suisse : Genève, Lausanne, Zurich, etc.)\n6. full_name (nom complet du client)\n\n**FORMAT DE RÉPONSE (JSON STRICT) :**\n{\n  \"message\": \"Ton message court pour le client\",\n  \"lead\": {\n    \"vehicle_make\": \"valeur ou null\",\n    \"vehicle_model\": \"valeur ou null\",\n    \"vehicle_year\": \"valeur ou null\",\n    \"glass_type\": \"valeur ou null\",\n    \"city\": \"valeur ou null\",\n    \"full_name\": \"valeur ou null\"\n  },\n  \"missing_fields\": [\"lead.vehicle_make\", \"lead.vehicle_model\", ...],\n  \"next_action\": \"ask_next\"\n}\n\n**COMPORTEMENT :**\n- Commence par saluer et demander la marque du véhicule si c'est le premier message\n- Complète progressivement les champs en fonction des réponses du client\n- Ne redemande JAMAIS un champ déjà collecté\n- Liste tous les champs manquants dans \"missing_fields\"\n- Si tous les champs sont remplis, félicite le client et indique qu'un conseiller le contactera\n\n**INTERDIT :**\n- Proposer un RDV\n- Parler d'assurance\n- Demander des photos\n- Mentionner WhatsApp, email, téléphone\n- Inventer des informations`;\n\nreturn {\n  messages: messages,\n  systemPrompt: systemPrompt\n};"
+      },
+      "id": "node-build-context",
+      "name": "Build LLM Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({\n  model: 'claude-3-5-sonnet-20241022',\n  max_tokens: 1024,\n  system: $json.systemPrompt,\n  messages: $json.messages\n}) }}",
+        "options": {}
+      },
+      "id": "node-call-llm",
+      "name": "Call LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "claude-api-key",
+          "name": "Claude API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Récupère la réponse du LLM\nconst llmResponse = $input.item.json;\n\n// Pour Claude API\nlet content = '';\nif (llmResponse.content && Array.isArray(llmResponse.content)) {\n  content = llmResponse.content[0].text;\n} else if (llmResponse.choices && llmResponse.choices[0]) {\n  // Pour OpenAI API\n  content = llmResponse.choices[0].message.content;\n} else {\n  content = llmResponse.content || llmResponse.text || '';\n}\n\n// Parse le JSON\ntry {\n  const parsed = JSON.parse(content);\n  return {\n    reply: parsed.message,\n    lead: parsed.lead || {},\n    missing_fields: parsed.missing_fields || [],\n    next_action: parsed.next_action || 'ask_next'\n  };\n} catch (error) {\n  // Fallback si le JSON est invalide\n  return {\n    reply: \"Désolé, j'ai eu un souci technique. Peux-tu répéter ton message ?\",\n    lead: {},\n    missing_fields: [],\n    next_action: 'error'\n  };\n}"
+      },
+      "id": "node-parse-json",
+      "name": "Parse LLM JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (conversation_id, role, content)\nVALUES (\n  '{{ $('Get or Create Conversation').item.json.id }}',\n  'assistant',\n  '{{ $json.reply }}'\n)\nRETURNING id, conversation_id, role, content, created_at;"
+      },
+      "id": "node-insert-assistant-msg",
+      "name": "Insert Assistant Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1850, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase-ouiglass",
+          "name": "Supabase OuiGlass"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ reply: $('Parse LLM JSON').item.json.reply }) }}"
+      },
+      "id": "node-respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2050, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Chat": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Get or Create Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get or Create Conversation": {
+      "main": [
+        [
+          {
+            "node": "Insert User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert User Message": {
+      "main": [
+        [
+          {
+            "node": "Get Last N Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Last N Messages": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM Context": {
+      "main": [
+        [
+          {
+            "node": "Call LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call LLM": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM JSON": {
+      "main": [
+        [
+          {
+            "node": "Insert Assistant Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Assistant Message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-01-21T00:00:00.000Z",
+  "versionId": "1"
+}
